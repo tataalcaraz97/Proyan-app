@@ -558,9 +558,9 @@ export default function App() {
       (o.segments || []).forEach((seg) => {
         if (!seg.end) return; // solo tiempo cerrado cuenta para el reporte
         if (monthKey(seg.start) !== reportMonth) return;
-        const share = (seg.end - seg.start) / 1000 / ids.length; // partes iguales entre los asignados
+        const segHours = (seg.end - seg.start) / 1000; // tiempo completo para cada mecánico que comparte la orden
         ids.forEach((id) => {
-          if (acc[id]) acc[id][o.type] += share;
+          if (acc[id]) acc[id][o.type] += segHours;
         });
       });
     });
@@ -663,6 +663,60 @@ export default function App() {
     });
 
     ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    // ---- Segunda hoja: detalle de órdenes del mes ----
+    const ws2 = wb.addWorksheet("Detalle de órdenes");
+    ws2.columns = [
+      { header: "N° de orden", key: "code", width: 14 },
+      { header: "Cliente", key: "client", width: 24 },
+      { header: "Vehículo", key: "vehicle", width: 20 },
+      { header: "Trabajo realizado", key: "work", width: 45 },
+      { header: "Tipo", key: "type", width: 8 },
+      { header: "Sucursal", key: "branch", width: 14 },
+      { header: "Mecánicos", key: "mechs", width: 26 },
+      { header: "Horas (mes)", key: "hours", width: 12 },
+    ];
+    const header2 = ws2.getRow(1);
+    header2.height = 22;
+    header2.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1B1E22" } };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    });
+
+    orders.forEach((o) => {
+      const monthSeconds = (o.segments || [])
+        .filter((seg) => seg.end && monthKey(seg.start) === reportMonth)
+        .reduce((acc, seg) => acc + (seg.end - seg.start) / 1000, 0);
+      if (monthSeconds === 0) return;
+      const ids = getOrderMechanicIds(o);
+      const mechNames = ids.map((id) => mechanicById[id]).filter(Boolean).join(", ");
+      const row = ws2.addRow({
+        code: o.code,
+        client: o.client,
+        vehicle: o.vehicle,
+        work: o.description || "",
+        type: o.type,
+        branch: o.branch || "",
+        mechs: mechNames,
+        hours: +formatHours(monthSeconds),
+      });
+      row.alignment = { vertical: "middle", wrapText: true };
+      row.getCell("hours").numFmt = "0.00";
+      row.getCell("hours").alignment = { horizontal: "right" };
+    });
+
+    ws2.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          left: { style: "thin", color: { argb: "FFE0E0E0" } },
+          right: { style: "thin", color: { argb: "FFE0E0E0" } },
+          top: { style: "thin", color: { argb: "FFE0E0E0" } },
+          bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+        };
+      });
+    });
+    ws2.views = [{ state: "frozen", ySplit: 1 }];
 
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
