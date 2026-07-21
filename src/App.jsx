@@ -31,24 +31,24 @@ function getOrderMechanicIds(order) {
    TOKENS
 --------------------------------------------------------- */
 const COLORS = {
-  bg: "#121417",
-  surface: "#1B1E22",
-  surfaceAlt: "#22262B",
-  line: "#2E3339",
-  text: "#EDEFF2",
-  textDim: "#9BA3AD",
-  accent: "#F2A93B", // safety amber — primary action
-  accentDim: "rgba(242,169,59,0.14)",
+  bg: "#0B0B0C",
+  surface: "#181112",
+  surfaceAlt: "#221718",
+  line: "#3A2224",
+  text: "#F3ECEC",
+  textDim: "#A88C8D",
+  accent: "#E4232A", // rojo — color principal / acción primaria
+  accentDim: "rgba(228,35,42,0.16)",
   green: "#3FB27F",
   greenDim: "rgba(63,178,127,0.14)",
   amber: "#E8B339",
   amberDim: "rgba(232,179,57,0.14)",
-  gray: "#7A828C",
-  grayDim: "rgba(122,130,140,0.14)",
+  gray: "#8A7274",
+  grayDim: "rgba(138,114,116,0.16)",
   teal: "#2FB6C4",
   tealDim: "rgba(47,182,196,0.14)",
-  red: "#E15B4F",
-  redDim: "rgba(225,91,79,0.14)",
+  red: "#B3261E",
+  redDim: "rgba(179,38,30,0.18)",
 };
 
 const ORDER_TYPES = {
@@ -145,7 +145,7 @@ function Chip({ active, onClick, children }) {
       className="px-3 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap"
       style={{
         backgroundColor: active ? COLORS.accent : COLORS.surfaceAlt,
-        color: active ? "#1A1300" : COLORS.textDim,
+        color: active ? "#FFFFFF" : COLORS.textDim,
         border: `1px solid ${active ? COLORS.accent : COLORS.line}`,
       }}
     >
@@ -156,10 +156,10 @@ function Chip({ active, onClick, children }) {
 
 function ActionButton({ icon: Icon, label, onClick, tone = "accent", full }) {
   const toneMap = {
-    accent: { bg: COLORS.accent, fg: "#1A1300" },
+    accent: { bg: COLORS.accent, fg: "#FFFFFF" },
     green: { bg: COLORS.green, fg: "#052015" },
     amber: { bg: COLORS.amber, fg: "#241900" },
-    red: { bg: COLORS.red, fg: "#210000" },
+    red: { bg: COLORS.red, fg: "#FFFFFF" },
     ghost: { bg: COLORS.surfaceAlt, fg: COLORS.text },
   };
   const t = toneMap[tone];
@@ -765,7 +765,7 @@ export default function App() {
                   className="flex-1 py-2 text-sm font-semibold transition-colors"
                   style={{
                     backgroundColor: role === r ? COLORS.accent : "transparent",
-                    color: role === r ? "#1A1300" : COLORS.textDim,
+                    color: role === r ? "#FFFFFF" : COLORS.textDim,
                   }}
                 >
                   {r === "admin" ? "Panel Admin" : "Panel Mecánico"}
@@ -943,7 +943,7 @@ function AdminPanel(props) {
           <button
             onClick={() => setShowForm((v) => !v)}
             className="w-full mb-3 flex items-center justify-center gap-2 rounded-lg py-2.5 font-semibold text-sm"
-            style={{ backgroundColor: showForm ? COLORS.surfaceAlt : COLORS.accent, color: showForm ? COLORS.text : "#1A1300" }}
+            style={{ backgroundColor: showForm ? COLORS.surfaceAlt : COLORS.accent, color: showForm ? COLORS.text : "#FFFFFF" }}
           >
             {showForm ? <X size={16} /> : <Plus size={16} />}
             {showForm ? "Cancelar" : "Nueva orden"}
@@ -1223,7 +1223,7 @@ function AdminPanel(props) {
             <button
               type="submit"
               className="px-4 rounded-md font-semibold text-sm"
-              style={{ backgroundColor: COLORS.accent, color: "#1A1300" }}
+              style={{ backgroundColor: COLORS.accent, color: "#FFFFFF" }}
             >
               Agregar
             </button>
@@ -1354,7 +1354,7 @@ function AdminPanel(props) {
               <button
                 type="submit"
                 className="px-4 rounded-md font-semibold text-sm"
-                style={{ backgroundColor: COLORS.accent, color: "#1A1300" }}
+                style={{ backgroundColor: COLORS.accent, color: "#FFFFFF" }}
               >
                 Guardar
               </button>
