@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { doc, onSnapshot, updateDoc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
+import ExcelJS from "exceljs";
 
 const WORKSHOP_DOC = doc(db, "proyan", "workshop");
 const DEFAULT_MECHANICS = [
@@ -238,6 +239,12 @@ function TicketCard({ order, mechanicNames, now, expanded, onToggle, actions, sh
             <p className="text-sm mt-2" style={{ color: COLORS.text }}>
               {order.description}
             </p>
+          )}
+          {order.finishNote && (
+            <div className="mt-3 rounded-md p-2.5" style={{ backgroundColor: COLORS.tealDim }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: COLORS.teal }}>OBSERVACIÓN FINAL</p>
+              <p className="text-sm" style={{ color: COLORS.text }}>{order.finishNote}</p>
+            </div>
           )}
           {order.trip && (
             <div className="mt-3 rounded-md p-2.5" style={{ backgroundColor: COLORS.surfaceAlt }}>
@@ -480,11 +487,11 @@ export default function App() {
     }));
   }
 
-  function finishOrder(id) {
+  function finishOrder(id, note) {
     updateOrder(id, (o) => {
       const segs = [...(o.segments || [])];
       if (segs.length && !segs[segs.length - 1].end) segs[segs.length - 1] = { ...segs[segs.length - 1], end: Date.now() };
-      return { ...o, status: "finalizada", segments: segs };
+      return { ...o, status: "finalizada", segments: segs, finishNote: (note || "").trim() };
     });
   }
 
@@ -558,19 +565,85 @@ export default function App() {
     OTG: +formatHours(r.OTG),
   }));
 
-  function exportCsv() {
-    const header = "Mecanico,OTN (h),OTI (h),OTG (h),Total (h)\n";
-    const rows = reportRows
-      .map((r) => {
-        const total = r.OTN + r.OTI + r.OTG;
-        return `${r.name},${formatHours(r.OTN)},${formatHours(r.OTI)},${formatHours(r.OTG)},${formatHours(total)}`;
-      })
-      .join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+  async function exportExcel() {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "Proyan";
+    const ws = wb.addWorksheet(`Horas ${reportMonth}`);
+
+    ws.columns = [
+      { header: "Mecánico", key: "name", width: 26 },
+      { header: "OTN (h)", key: "OTN", width: 12 },
+      { header: "OTI (h)", key: "OTI", width: 12 },
+      { header: "OTG (h)", key: "OTG", width: 12 },
+      { header: "Total (h)", key: "total", width: 14 },
+    ];
+
+    const headerRow = ws.getRow(1);
+    headerRow.height = 22;
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1B1E22" } };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    });
+
+    const grand = { OTN: 0, OTI: 0, OTG: 0 };
+    reportRows.forEach((r) => {
+      const total = r.OTN + r.OTI + r.OTG;
+      grand.OTN += r.OTN;
+      grand.OTI += r.OTI;
+      grand.OTG += r.OTG;
+      const row = ws.addRow({
+        name: r.name,
+        OTN: +formatHours(r.OTN),
+        OTI: +formatHours(r.OTI),
+        OTG: +formatHours(r.OTG),
+        total: +formatHours(total),
+      });
+      row.alignment = { vertical: "middle" };
+      ["OTN", "OTI", "OTG", "total"].forEach((k) => {
+        row.getCell(k).numFmt = "0.00";
+        row.getCell(k).alignment = { horizontal: "right" };
+      });
+    });
+
+    const grandTotal = grand.OTN + grand.OTI + grand.OTG;
+    const totalRow = ws.addRow({
+      name: "TOTAL",
+      OTN: +formatHours(grand.OTN),
+      OTI: +formatHours(grand.OTI),
+      OTG: +formatHours(grand.OTG),
+      total: +formatHours(grandTotal),
+    });
+    totalRow.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.border = { top: { style: "thin", color: { argb: "FF888888" } } };
+    });
+    ["OTN", "OTI", "OTG", "total"].forEach((k) => {
+      totalRow.getCell(k).numFmt = "0.00";
+      totalRow.getCell(k).alignment = { horizontal: "right" };
+    });
+
+    ws.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          ...cell.border,
+          left: { style: "thin", color: { argb: "FFE0E0E0" } },
+          right: { style: "thin", color: { argb: "FFE0E0E0" } },
+          bottom: cell.border?.bottom || { style: "thin", color: { argb: "FFE0E0E0" } },
+        };
+      });
+    });
+
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `reporte_horas_${reportMonth}.csv`;
+    a.download = `reporte_horas_${reportMonth}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -707,7 +780,7 @@ export default function App() {
             setReportMonth={setReportMonth}
             reportRows={reportRows}
             chartData={chartData}
-            exportCsv={exportCsv}
+            exportExcel={exportExcel}
             newMechName={newMechName}
             setNewMechName={setNewMechName}
             addMechanic={addMechanic}
@@ -753,7 +826,7 @@ function AdminPanel(props) {
     adminTab, setAdminTab, filterStatus, setFilterStatus, filterType, setFilterType,
     filterBranch, setFilterBranch,
     showForm, setShowForm, form, setForm, createOrder, toggleFormMechanic, filteredOrders, expandedId, setExpandedId,
-    mechanicById, mechanics, now, reportMonth, setReportMonth, reportRows, chartData, exportCsv,
+    mechanicById, mechanics, now, reportMonth, setReportMonth, reportRows, chartData, exportExcel,
     newMechName, setNewMechName, addMechanic, orders, persistMechanics, accessCode, changeAccessCode,
     regenerateMechanicCode, removeMechanicFromOrders,
   } = props;
@@ -1083,12 +1156,12 @@ function AdminPanel(props) {
               </div>
 
               <button
-                onClick={exportCsv}
+                onClick={exportExcel}
                 className="w-full mt-3 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold"
                 style={{ backgroundColor: COLORS.surfaceAlt, color: COLORS.text, border: `1px solid ${COLORS.line}` }}
               >
                 <Download size={16} />
-                Exportar CSV
+                Exportar Excel
               </button>
               <p className="text-[11px] mt-2 text-center" style={{ color: COLORS.textDim }}>
                 Solo se contabilizan tramos de tiempo ya cerrados (pausados o finalizados).
@@ -1286,6 +1359,26 @@ function MechanicPanel(props) {
     setPauseNote("");
   }
 
+  const [finishingId, setFinishingId] = useState(null);
+  const [finishNote, setFinishNote] = useState("");
+
+  function requestFinish(id) {
+    setFinishingId(id);
+    setFinishNote("");
+    setExpandedId(id);
+  }
+
+  function confirmFinish(id) {
+    finishOrder(id, finishNote);
+    setFinishingId(null);
+    setFinishNote("");
+  }
+
+  function cancelFinish() {
+    setFinishingId(null);
+    setFinishNote("");
+  }
+
   return (
     <div>
       {loggedInMechanicId ? null : (
@@ -1316,7 +1409,26 @@ function MechanicPanel(props) {
         {mechanicOrders.length === 0 && <EmptyState text="No tenés órdenes asignadas por ahora." />}
         {mechanicOrders.map((o) => {
           let actions = null;
-          if (pausingId === o.id) {
+          if (finishingId === o.id) {
+            actions = (
+              <div className="w-full">
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: COLORS.textDim }}>
+                  Observación final
+                </label>
+                <textarea
+                  autoFocus
+                  value={finishNote}
+                  onChange={(e) => setFinishNote(e.target.value)}
+                  placeholder="Ej: trabajo finalizado, unidad probada y comprobado su correcto funcionamiento"
+                  style={{ ...inputStyle, minHeight: 60, width: "100%" }}
+                />
+                <div className="flex gap-2 mt-2">
+                  <ActionButton icon={Check} label="Confirmar finalización" tone="red" full onClick={() => confirmFinish(o.id)} />
+                  <ActionButton icon={X} label="Cancelar" tone="ghost" full onClick={cancelFinish} />
+                </div>
+              </div>
+            );
+          } else if (pausingId === o.id) {
             actions = (
               <div className="w-full">
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: COLORS.textDim }}>
@@ -1341,14 +1453,14 @@ function MechanicPanel(props) {
             actions = (
               <>
                 <ActionButton icon={Pause} label="Pausar" tone="amber" full onClick={() => requestPause(o.id)} />
-                <ActionButton icon={Square} label="Finalizar" tone="red" full onClick={() => finishOrder(o.id)} />
+                <ActionButton icon={Square} label="Finalizar" tone="red" full onClick={() => requestFinish(o.id)} />
               </>
             );
           } else if (o.status === "pausada") {
             actions = (
               <>
                 <ActionButton icon={Play} label="Reanudar" tone="green" full onClick={() => resumeOrder(o.id)} />
-                <ActionButton icon={Square} label="Finalizar" tone="red" full onClick={() => finishOrder(o.id)} />
+                <ActionButton icon={Square} label="Finalizar" tone="red" full onClick={() => requestFinish(o.id)} />
               </>
             );
           }
