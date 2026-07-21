@@ -11,10 +11,20 @@ import { db } from "./firebase";
 
 const WORKSHOP_DOC = doc(db, "proyan", "workshop");
 const DEFAULT_MECHANICS = [
-  { id: "m1", name: "Carlos Medina" },
-  { id: "m2", name: "Julián Rivas" },
-  { id: "m3", name: "Emanuel Soto" },
+  { id: "m1", name: "Carlos Medina", code: "1001" },
+  { id: "m2", name: "Julián Rivas", code: "1002" },
+  { id: "m3", name: "Emanuel Soto", code: "1003" },
 ];
+
+function genMechCode() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function getOrderMechanicIds(order) {
+  if (Array.isArray(order.mechanicIds)) return order.mechanicIds;
+  if (order.mechanicId) return [order.mechanicId];
+  return [];
+}
 
 /* ---------------------------------------------------------
    TOKENS
@@ -45,6 +55,8 @@ const ORDER_TYPES = {
   OTI: { label: "Orden de Trabajo Interna", color: "#B26EF2", dim: "rgba(178,110,242,0.14)" },
   OTG: { label: "Orden de Trabajo en Garantía", color: COLORS.accent, dim: COLORS.accentDim },
 };
+
+const BRANCHES = ["Mackenna", "Río Cuarto"];
 
 const STATUS_META = {
   pendiente: { label: "Pendiente", color: COLORS.gray, dim: COLORS.grayDim },
@@ -158,7 +170,7 @@ function ActionButton({ icon: Icon, label, onClick, tone = "accent", full }) {
 /* ---------------------------------------------------------
    TICKET CARD (order)
 --------------------------------------------------------- */
-function TicketCard({ order, mechanicName, now, expanded, onToggle, actions, showMechanic }) {
+function TicketCard({ order, mechanicNames, now, expanded, onToggle, actions, showMechanic }) {
   const seconds = getOrderSeconds(order, now);
   const type = ORDER_TYPES[order.type];
   const status = STATUS_META[order.status];
@@ -180,13 +192,14 @@ function TicketCard({ order, mechanicName, now, expanded, onToggle, actions, sho
             </span>
             <Badge text={order.type} color={type.color} dim={type.dim} />
             <Badge text={status.label} color={status.color} dim={status.dim} />
+            {order.branch && <Badge text={order.branch} color={COLORS.textDim} dim={COLORS.surfaceAlt} />}
           </div>
           <p className="text-sm truncate" style={{ color: COLORS.text }}>
             {order.client} · {order.vehicle}
           </p>
           {showMechanic && (
-            <p className="text-xs mt-0.5" style={{ color: COLORS.textDim }}>
-              Asignado a {mechanicName || "sin asignar"}
+            <p className="text-xs mt-0.5 truncate" style={{ color: COLORS.textDim }}>
+              Asignado a {mechanicNames && mechanicNames.length ? mechanicNames.join(", ") : "sin asignar"}
             </p>
           )}
         </div>
@@ -288,17 +301,19 @@ export default function App() {
   const [unlocked, setUnlocked] = useState(false);
   const [codeInput, setCodeInput] = useState("");
   const [codeError, setCodeError] = useState("");
+  const [loggedInMechanicId, setLoggedInMechanicId] = useState(null);
 
   // admin state
   const [adminTab, setAdminTab] = useState("ordenes");
   const [filterStatus, setFilterStatus] = useState("todas");
   const [filterType, setFilterType] = useState("todas");
+  const [filterBranch, setFilterBranch] = useState("todas");
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [reportMonth, setReportMonth] = useState(currentMonthKey());
   const [newMechName, setNewMechName] = useState("");
   const [form, setForm] = useState({
-    client: "", vehicle: "", plate: "", description: "", type: "OTN", mechanicId: "",
+    client: "", vehicle: "", plate: "", description: "", type: "OTN", mechanicIds: [], branch: BRANCHES[0],
     hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "",
   });
 
@@ -317,12 +332,15 @@ export default function App() {
           setOrders(data.orders || []);
           setAccessCode(data.accessCode || "02120512");
           setActiveMechId((prev) => prev || (data.mechanics || DEFAULT_MECHANICS)[0]?.id || "");
-          setForm((f) => ({ ...f, mechanicId: f.mechanicId || (data.mechanics || DEFAULT_MECHANICS)[0]?.id || "" }));
+          setForm((f) => ({
+            ...f,
+            mechanicIds: f.mechanicIds.length ? f.mechanicIds : [(data.mechanics || DEFAULT_MECHANICS)[0]?.id].filter(Boolean),
+          }));
         } else {
           setDoc(WORKSHOP_DOC, { mechanics: DEFAULT_MECHANICS, orders: [], accessCode: "02120512" });
           setMechanics(DEFAULT_MECHANICS);
           setActiveMechId(DEFAULT_MECHANICS[0]?.id || "");
-          setForm((f) => ({ ...f, mechanicId: DEFAULT_MECHANICS[0]?.id || "" }));
+          setForm((f) => ({ ...f, mechanicIds: DEFAULT_MECHANICS[0]?.id ? [DEFAULT_MECHANICS[0].id] : [] }));
         }
         setLoading(false);
       },
@@ -362,12 +380,24 @@ export default function App() {
 
   function checkCode(e) {
     e.preventDefault();
-    if (codeInput.trim() === String(accessCode)) {
+    const val = codeInput.trim();
+    if (val === String(accessCode)) {
       setUnlocked(true);
+      setLoggedInMechanicId(null);
+      setRole("admin");
       setCodeError("");
-    } else {
-      setCodeError("Código incorrecto. Pedíselo al administrador.");
+      return;
     }
+    const mech = mechanics.find((m) => m.code && String(m.code) === val);
+    if (mech) {
+      setUnlocked(true);
+      setLoggedInMechanicId(mech.id);
+      setRole("mecanico");
+      setActiveMechId(mech.id);
+      setCodeError("");
+      return;
+    }
+    setCodeError("Código incorrecto. Pedíselo al administrador.");
   }
 
   const changeAccessCode = useCallback(async (newCode) => {
@@ -380,9 +410,18 @@ export default function App() {
   }, []);
 
   /* ---------- order actions ---------- */
+  function toggleFormMechanic(id) {
+    setForm((f) => ({
+      ...f,
+      mechanicIds: f.mechanicIds.includes(id)
+        ? f.mechanicIds.filter((mid) => mid !== id)
+        : [...f.mechanicIds, id],
+    }));
+  }
+
   function createOrder(e) {
     e.preventDefault();
-    if (!form.client.trim() || !form.vehicle.trim() || !form.mechanicId) return;
+    if (!form.client.trim() || !form.vehicle.trim() || form.mechanicIds.length === 0) return;
     const seq = orders.filter((o) => o.type === form.type).length + 1;
     const order = {
       id: uid(),
@@ -392,7 +431,8 @@ export default function App() {
       plate: form.plate.trim(),
       description: form.description.trim(),
       type: form.type,
-      mechanicId: form.mechanicId,
+      mechanicIds: form.mechanicIds,
+      branch: form.branch,
       status: "pendiente",
       segments: [],
       createdAt: Date.now(),
@@ -402,7 +442,8 @@ export default function App() {
     };
     persistOrders([order, ...orders]);
     setForm({
-      client: "", vehicle: "", plate: "", description: "", type: "OTN", mechanicId: mechanics[0]?.id || "",
+      client: "", vehicle: "", plate: "", description: "", type: "OTN",
+      mechanicIds: mechanics[0]?.id ? [mechanics[0].id] : [], branch: form.branch,
       hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "",
     });
     setShowForm(false);
@@ -447,11 +488,24 @@ export default function App() {
     });
   }
 
+  function removeMechanicFromOrders(mechId) {
+    const next = orders.map((o) => {
+      const ids = getOrderMechanicIds(o);
+      if (!ids.includes(mechId)) return o;
+      return { ...o, mechanicIds: ids.filter((id) => id !== mechId) };
+    });
+    persistOrders(next);
+  }
+
   function addMechanic(e) {
     e.preventDefault();
     if (!newMechName.trim()) return;
-    persistMechanics([...mechanics, { id: uid(), name: newMechName.trim() }]);
+    persistMechanics([...mechanics, { id: uid(), name: newMechName.trim(), code: genMechCode() }]);
     setNewMechName("");
+  }
+
+  function regenerateMechanicCode(id) {
+    persistMechanics(mechanics.map((m) => (m.id === id ? { ...m, code: genMechCode() } : m)));
   }
 
   /* ---------- derived data ---------- */
@@ -465,13 +519,14 @@ export default function App() {
     return orders.filter((o) => {
       if (filterStatus !== "todas" && o.status !== filterStatus) return false;
       if (filterType !== "todas" && o.type !== filterType) return false;
+      if (filterBranch !== "todas" && o.branch !== filterBranch) return false;
       return true;
     });
-  }, [orders, filterStatus, filterType]);
+  }, [orders, filterStatus, filterType, filterBranch]);
 
   const mechanicOrders = useMemo(() => {
     return orders
-      .filter((o) => o.mechanicId === activeMechId)
+      .filter((o) => getOrderMechanicIds(o).includes(activeMechId))
       .filter((o) => (showFinished ? true : o.status !== "finalizada"))
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [orders, activeMechId, showFinished]);
@@ -482,11 +537,15 @@ export default function App() {
       acc[m.id] = { name: m.name, OTN: 0, OTI: 0, OTG: 0 };
     });
     orders.forEach((o) => {
+      const ids = getOrderMechanicIds(o);
+      if (ids.length === 0) return;
       (o.segments || []).forEach((seg) => {
         if (!seg.end) return; // solo tiempo cerrado cuenta para el reporte
         if (monthKey(seg.start) !== reportMonth) return;
-        if (!acc[o.mechanicId]) return;
-        acc[o.mechanicId][o.type] += (seg.end - seg.start) / 1000;
+        const share = (seg.end - seg.start) / 1000 / ids.length; // partes iguales entre los asignados
+        ids.forEach((id) => {
+          if (acc[id]) acc[id][o.type] += share;
+        });
       });
     });
     return Object.values(acc);
@@ -592,21 +651,27 @@ export default function App() {
             Control de órdenes · {todayLabel()}
           </p>
 
-          <div className="flex mt-4 rounded-lg overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }}>
-            {["admin", "mecanico"].map((r) => (
-              <button
-                key={r}
-                onClick={() => setRole(r)}
-                className="flex-1 py-2 text-sm font-semibold transition-colors"
-                style={{
-                  backgroundColor: role === r ? COLORS.accent : "transparent",
-                  color: role === r ? "#1A1300" : COLORS.textDim,
-                }}
-              >
-                {r === "admin" ? "Panel Admin" : "Panel Mecánico"}
-              </button>
-            ))}
-          </div>
+          {loggedInMechanicId ? (
+            <p className="text-sm mt-4 font-medium" style={{ color: COLORS.accent }}>
+              Ingresaste como {mechanicById[loggedInMechanicId] || "mecánico"}
+            </p>
+          ) : (
+            <div className="flex mt-4 rounded-lg overflow-hidden" style={{ border: `1px solid ${COLORS.line}` }}>
+              {["admin", "mecanico"].map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setRole(r)}
+                  className="flex-1 py-2 text-sm font-semibold transition-colors"
+                  style={{
+                    backgroundColor: role === r ? COLORS.accent : "transparent",
+                    color: role === r ? "#1A1300" : COLORS.textDim,
+                  }}
+                >
+                  {r === "admin" ? "Panel Admin" : "Panel Mecánico"}
+                </button>
+              ))}
+            </div>
+          )}
           {!storageOk && (
             <p className="text-xs mt-2" style={{ color: COLORS.red }}>
               No se pudo sincronizar con el almacenamiento — los cambios quedan solo en esta sesión.
@@ -624,11 +689,14 @@ export default function App() {
             setFilterStatus={setFilterStatus}
             filterType={filterType}
             setFilterType={setFilterType}
+            filterBranch={filterBranch}
+            setFilterBranch={setFilterBranch}
             showForm={showForm}
             setShowForm={setShowForm}
             form={form}
             setForm={setForm}
             createOrder={createOrder}
+            toggleFormMechanic={toggleFormMechanic}
             filteredOrders={filteredOrders}
             expandedId={expandedId}
             setExpandedId={setExpandedId}
@@ -645,6 +713,8 @@ export default function App() {
             addMechanic={addMechanic}
             orders={orders}
             persistMechanics={persistMechanics}
+            regenerateMechanicCode={regenerateMechanicCode}
+            removeMechanicFromOrders={removeMechanicFromOrders}
             accessCode={accessCode}
             changeAccessCode={changeAccessCode}
           />
@@ -663,6 +733,7 @@ export default function App() {
             pauseOrder={pauseOrder}
             resumeOrder={resumeOrder}
             finishOrder={finishOrder}
+            loggedInMechanicId={loggedInMechanicId}
           />
         )}
       </div>
@@ -680,9 +751,11 @@ export default function App() {
 function AdminPanel(props) {
   const {
     adminTab, setAdminTab, filterStatus, setFilterStatus, filterType, setFilterType,
-    showForm, setShowForm, form, setForm, createOrder, filteredOrders, expandedId, setExpandedId,
+    filterBranch, setFilterBranch,
+    showForm, setShowForm, form, setForm, createOrder, toggleFormMechanic, filteredOrders, expandedId, setExpandedId,
     mechanicById, mechanics, now, reportMonth, setReportMonth, reportRows, chartData, exportCsv,
     newMechName, setNewMechName, addMechanic, orders, persistMechanics, accessCode, changeAccessCode,
+    regenerateMechanicCode, removeMechanicFromOrders,
   } = props;
 
   const [editingId, setEditingId] = useState(null);
@@ -706,6 +779,7 @@ function AdminPanel(props) {
 
   function confirmDelete(id) {
     persistMechanics(mechanics.filter((m) => m.id !== id));
+    removeMechanicFromOrders(id);
     setConfirmDeleteId(null);
   }
 
@@ -754,6 +828,13 @@ function AdminPanel(props) {
             {["todas", "OTN", "OTI", "OTG"].map((t) => (
               <Chip key={t} active={filterType === t} onClick={() => setFilterType(t)}>
                 {t}
+              </Chip>
+            ))}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1 mb-3">
+            {["todas", ...BRANCHES].map((b) => (
+              <Chip key={b} active={filterBranch === b} onClick={() => setFilterBranch(b)}>
+                {b === "todas" ? "Todas las sucursales" : b}
               </Chip>
             ))}
           </div>
@@ -811,6 +892,25 @@ function AdminPanel(props) {
                   placeholder="Detalle de la reparación"
                 />
               </Field>
+              <Field label="Sucursal">
+                <div className="flex gap-2">
+                  {BRANCHES.map((b) => (
+                    <button
+                      type="button"
+                      key={b}
+                      onClick={() => setForm({ ...form, branch: b })}
+                      className="flex-1 py-2 rounded-md text-xs font-bold"
+                      style={{
+                        backgroundColor: form.branch === b ? COLORS.accentDim : COLORS.surfaceAlt,
+                        color: form.branch === b ? COLORS.accent : COLORS.textDim,
+                        border: `1px solid ${form.branch === b ? COLORS.accent : COLORS.line}`,
+                      }}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              </Field>
               <Field label="Tipo de orden">
                 <div className="flex gap-2">
                   {Object.keys(ORDER_TYPES).map((t) => (
@@ -830,19 +930,27 @@ function AdminPanel(props) {
                   ))}
                 </div>
               </Field>
-              <Field label="Mecánico asignado">
-                <select
-                  value={form.mechanicId}
-                  onChange={(e) => setForm({ ...form, mechanicId: e.target.value })}
-                  className="w-full"
-                  style={inputStyle}
-                >
-                  {mechanics.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
+              <Field label="Mecánicos asignados (podés elegir más de uno)">
+                <div className="space-y-1.5">
+                  {mechanics.map((m) => {
+                    const checked = form.mechanicIds.includes(m.id);
+                    return (
+                      <label
+                        key={m.id}
+                        className="flex items-center gap-2 text-sm rounded-md px-2 py-1.5"
+                        style={{ backgroundColor: checked ? COLORS.accentDim : "transparent", color: COLORS.text }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleFormMechanic(m.id)}
+                          style={{ accentColor: COLORS.accent }}
+                        />
+                        {m.name}
+                      </label>
+                    );
+                  })}
+                </div>
               </Field>
 
               <label className="flex items-center gap-2 text-sm" style={{ color: COLORS.text }}>
@@ -901,7 +1009,7 @@ function AdminPanel(props) {
               <TicketCard
                 key={o.id}
                 order={o}
-                mechanicName={mechanicById[o.mechanicId]}
+                mechanicNames={getOrderMechanicIds(o).map((id) => mechanicById[id]).filter(Boolean)}
                 now={now}
                 expanded={expandedId === o.id}
                 onToggle={() => setExpandedId(expandedId === o.id ? null : o.id)}
@@ -1007,10 +1115,13 @@ function AdminPanel(props) {
               Agregar
             </button>
           </form>
+          <p className="text-xs mb-3" style={{ color: COLORS.textDim }}>
+            Cada mecánico tiene su propio código (el número naranja). Con ese código entra directo a su panel — no ve Admin ni puede elegir ser otro mecánico.
+          </p>
           <div className="space-y-2">
             {mechanics.length === 0 && <EmptyState text="Todavía no hay mecánicos cargados." />}
             {mechanics.map((m) => {
-              const count = orders.filter((o) => o.mechanicId === m.id && o.status !== "finalizada").length;
+              const count = orders.filter((o) => getOrderMechanicIds(o).includes(m.id) && o.status !== "finalizada").length;
               const isEditing = editingId === m.id;
               const isConfirmingDelete = confirmDeleteId === m.id;
               return (
@@ -1048,6 +1159,21 @@ function AdminPanel(props) {
                         <div className="min-w-0">
                           <span style={{ color: COLORS.text }} className="text-sm font-medium block truncate">{m.name}</span>
                           <span className="text-xs" style={{ color: COLORS.textDim }}>{count} activas</span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span
+                              className="text-xs font-bold px-1.5 py-0.5 rounded"
+                              style={{ fontFamily: "'JetBrains Mono', monospace", color: COLORS.accent, backgroundColor: COLORS.accentDim }}
+                            >
+                              {m.code || "sin código"}
+                            </span>
+                            <button
+                              onClick={() => regenerateMechanicCode(m.id)}
+                              className="text-xs underline"
+                              style={{ color: COLORS.textDim }}
+                            >
+                              Regenerar
+                            </button>
+                          </div>
                         </div>
                       )}
                       <div className="flex items-center gap-1 shrink-0">
@@ -1100,10 +1226,10 @@ function AdminPanel(props) {
 
           <div className="mt-6 rounded-lg p-4" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
             <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.textDim }}>
-              Código de acceso
+              Código de acceso del administrador
             </p>
             <p className="text-xs mb-3" style={{ color: COLORS.textDim }}>
-              Es el código que le pedís a cada mecánico para poder entrar a la app. Compartíselo vos directamente.
+              Es tu código, el único que abre el panel Admin. No se lo compartas a los mecánicos — ellos usan su propio código individual (arriba).
             </p>
             <form onSubmit={saveCode} className="flex gap-2">
               <input
@@ -1137,6 +1263,7 @@ function MechanicPanel(props) {
   const {
     mechanics, activeMechId, setActiveMechId, mechanicOrders, showFinished, setShowFinished,
     expandedId, setExpandedId, now, startOrder, pauseOrder, resumeOrder, finishOrder,
+    loggedInMechanicId,
   } = props;
 
   const [pausingId, setPausingId] = useState(null);
@@ -1161,18 +1288,20 @@ function MechanicPanel(props) {
 
   return (
     <div>
-      <Field label="Sos">
-        <select
-          value={activeMechId}
-          onChange={(e) => setActiveMechId(e.target.value)}
-          style={inputStyle}
-          className="w-full"
-        >
-          {mechanics.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
-      </Field>
+      {loggedInMechanicId ? null : (
+        <Field label="Sos">
+          <select
+            value={activeMechId}
+            onChange={(e) => setActiveMechId(e.target.value)}
+            style={inputStyle}
+            className="w-full"
+          >
+            {mechanics.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
 
       <div className="flex items-center justify-between mt-4 mb-2">
         <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.textDim }}>
