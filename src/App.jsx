@@ -91,6 +91,15 @@ function formatHours(totalSeconds) {
   return (totalSeconds / 3600).toFixed(2);
 }
 
+function formatHM(totalSeconds) {
+  const totalMinutes = Math.round(totalSeconds / 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
 function getOrderSeconds(order, now) {
   return (order.segments || []).reduce((acc, seg) => {
     const end = seg.end || now;
@@ -572,10 +581,14 @@ export default function App() {
 
     ws.columns = [
       { header: "Mecánico", key: "name", width: 26 },
-      { header: "OTN (h)", key: "OTN", width: 12 },
-      { header: "OTI (h)", key: "OTI", width: 12 },
-      { header: "OTG (h)", key: "OTG", width: 12 },
-      { header: "Total (h)", key: "total", width: 14 },
+      { header: "OTN (h)", key: "OTN", width: 11 },
+      { header: "OTN (h:min)", key: "OTN_hm", width: 13 },
+      { header: "OTI (h)", key: "OTI", width: 11 },
+      { header: "OTI (h:min)", key: "OTI_hm", width: 13 },
+      { header: "OTG (h)", key: "OTG", width: 11 },
+      { header: "OTG (h:min)", key: "OTG_hm", width: 13 },
+      { header: "Total (h)", key: "total", width: 12 },
+      { header: "Total (h:min)", key: "total_hm", width: 14 },
     ];
 
     const headerRow = ws.getRow(1);
@@ -595,14 +608,22 @@ export default function App() {
       const row = ws.addRow({
         name: r.name,
         OTN: +formatHours(r.OTN),
+        OTN_hm: formatHM(r.OTN),
         OTI: +formatHours(r.OTI),
+        OTI_hm: formatHM(r.OTI),
         OTG: +formatHours(r.OTG),
+        OTG_hm: formatHM(r.OTG),
         total: +formatHours(total),
+        total_hm: formatHM(total),
       });
       row.alignment = { vertical: "middle" };
       ["OTN", "OTI", "OTG", "total"].forEach((k) => {
         row.getCell(k).numFmt = "0.00";
         row.getCell(k).alignment = { horizontal: "right" };
+      });
+      ["OTN_hm", "OTI_hm", "OTG_hm", "total_hm"].forEach((k) => {
+        row.getCell(k).alignment = { horizontal: "right" };
+        row.getCell(k).font = { color: { argb: "FF888888" } };
       });
     });
 
@@ -610,9 +631,13 @@ export default function App() {
     const totalRow = ws.addRow({
       name: "TOTAL",
       OTN: +formatHours(grand.OTN),
+      OTN_hm: formatHM(grand.OTN),
       OTI: +formatHours(grand.OTI),
+      OTI_hm: formatHM(grand.OTI),
       OTG: +formatHours(grand.OTG),
+      OTG_hm: formatHM(grand.OTG),
       total: +formatHours(grandTotal),
+      total_hm: formatHM(grandTotal),
     });
     totalRow.eachCell((cell) => {
       cell.font = { bold: true };
@@ -620,6 +645,9 @@ export default function App() {
     });
     ["OTN", "OTI", "OTG", "total"].forEach((k) => {
       totalRow.getCell(k).numFmt = "0.00";
+      totalRow.getCell(k).alignment = { horizontal: "right" };
+    });
+    ["OTN_hm", "OTI_hm", "OTG_hm", "total_hm"].forEach((k) => {
       totalRow.getCell(k).alignment = { horizontal: "right" };
     });
 
@@ -1132,10 +1160,10 @@ function AdminPanel(props) {
                   <thead>
                     <tr style={{ backgroundColor: COLORS.surfaceAlt, color: COLORS.textDim }}>
                       <th className="text-left py-2 px-2 font-semibold">Mecánico</th>
-                      <th className="text-right py-2 px-2 font-semibold" style={{ color: ORDER_TYPES.OTN.color }}>OTN</th>
-                      <th className="text-right py-2 px-2 font-semibold" style={{ color: ORDER_TYPES.OTI.color }}>OTI</th>
-                      <th className="text-right py-2 px-2 font-semibold" style={{ color: ORDER_TYPES.OTG.color }}>OTG</th>
-                      <th className="text-right py-2 px-2 font-semibold" style={{ color: COLORS.text }}>Total</th>
+                      <th className="text-right py-2 px-2 font-semibold" style={{ color: ORDER_TYPES.OTN.color }}>OTN (h · min)</th>
+                      <th className="text-right py-2 px-2 font-semibold" style={{ color: ORDER_TYPES.OTI.color }}>OTI (h · min)</th>
+                      <th className="text-right py-2 px-2 font-semibold" style={{ color: ORDER_TYPES.OTG.color }}>OTG (h · min)</th>
+                      <th className="text-right py-2 px-2 font-semibold" style={{ color: COLORS.text }}>Total (h · min)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1144,10 +1172,22 @@ function AdminPanel(props) {
                       return (
                         <tr key={i} style={{ borderTop: `1px solid ${COLORS.line}`, color: COLORS.text }}>
                           <td className="py-2 px-2">{r.name}</td>
-                          <td className="text-right py-2 px-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{formatHours(r.OTN)}</td>
-                          <td className="text-right py-2 px-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{formatHours(r.OTI)}</td>
-                          <td className="text-right py-2 px-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{formatHours(r.OTG)}</td>
-                          <td className="text-right py-2 px-2 font-bold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{formatHours(total)}</td>
+                          <td className="text-right py-2 px-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                            {formatHours(r.OTN)}
+                            <span className="block text-[10px]" style={{ color: COLORS.textDim }}>{formatHM(r.OTN)}</span>
+                          </td>
+                          <td className="text-right py-2 px-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                            {formatHours(r.OTI)}
+                            <span className="block text-[10px]" style={{ color: COLORS.textDim }}>{formatHM(r.OTI)}</span>
+                          </td>
+                          <td className="text-right py-2 px-2" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                            {formatHours(r.OTG)}
+                            <span className="block text-[10px]" style={{ color: COLORS.textDim }}>{formatHM(r.OTG)}</span>
+                          </td>
+                          <td className="text-right py-2 px-2 font-bold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                            {formatHours(total)}
+                            <span className="block text-[10px] font-normal" style={{ color: COLORS.textDim }}>{formatHM(total)}</span>
+                          </td>
                         </tr>
                       );
                     })}
