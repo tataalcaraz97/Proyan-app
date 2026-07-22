@@ -810,7 +810,11 @@ export default function App() {
     ws3.columns = [
       { header: "Fecha", key: "date", width: 14 },
       { header: "Mecánico", key: "mech", width: 22 },
-      { header: "Detalle del día", key: "text", width: 60 },
+      { header: "Turno mañana (8-12)", key: "morning", width: 40 },
+      { header: "Turno tarde (15-19)", key: "afternoon", width: 40 },
+      { header: "Break mañana (min)", key: "breakM", width: 16 },
+      { header: "Break tarde (min)", key: "breakT", width: 16 },
+      { header: "Total break (min)", key: "breakTotal", width: 16 },
     ];
     const header3 = ws3.getRow(1);
     header3.height = 22;
@@ -819,24 +823,52 @@ export default function App() {
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1B1E22" } };
       cell.alignment = { vertical: "middle", horizontal: "center" };
     });
+    const BREAK_MIN = 15;
+    let breakMinTotal = 0;
+    let breakTardeTotal = 0;
     dailyReports
       .filter((r) => r.date.slice(0, 7) === reportMonth)
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
       .forEach((r) => {
+        const bM = r.morningBreak ? BREAK_MIN : 0;
+        const bT = r.afternoonBreak ? BREAK_MIN : 0;
+        breakMinTotal += bM;
+        breakTardeTotal += bT;
         const row = ws3.addRow({
           date: r.date,
           mech: mechanicById[r.mechanicId] || "",
-          text: r.text || "",
+          morning: r.morningText || "",
+          afternoon: r.afternoonText || "",
+          breakM: bM,
+          breakT: bT,
+          breakTotal: bM + bT,
         });
         row.alignment = { vertical: "middle", wrapText: true };
+        ["breakM", "breakT", "breakTotal"].forEach((k) => (row.getCell(k).alignment = { horizontal: "right" }));
       });
+
+    const totalRow3 = ws3.addRow({
+      date: "",
+      mech: "TOTAL",
+      morning: "",
+      afternoon: "",
+      breakM: breakMinTotal,
+      breakT: breakTardeTotal,
+      breakTotal: breakMinTotal + breakTardeTotal,
+    });
+    totalRow3.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.border = { top: { style: "thin", color: { argb: "FF888888" } } };
+    });
+    ["breakM", "breakT", "breakTotal"].forEach((k) => (totalRow3.getCell(k).alignment = { horizontal: "right" }));
+
     ws3.eachRow((row) => {
       row.eachCell((cell) => {
         cell.border = {
+          ...cell.border,
           left: { style: "thin", color: { argb: "FFE0E0E0" } },
           right: { style: "thin", color: { argb: "FFE0E0E0" } },
-          top: { style: "thin", color: { argb: "FFE0E0E0" } },
-          bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+          bottom: cell.border?.bottom || { style: "thin", color: { argb: "FFE0E0E0" } },
         };
       });
     });
@@ -1416,7 +1448,7 @@ function AdminPanel(props) {
                   className="rounded-lg p-3"
                   style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.line}` }}
                 >
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-semibold" style={{ color: COLORS.text }}>
                       {mechanicById[r.mechanicId] || "Mecánico"}
                     </span>
@@ -1424,9 +1456,26 @@ function AdminPanel(props) {
                       {formatDateLabel(r.date)}
                     </span>
                   </div>
-                  <p className="text-sm whitespace-pre-wrap" style={{ color: COLORS.text }}>
-                    {r.text || "(sin detalle)"}
+                  <p className="text-xs font-semibold mb-0.5" style={{ color: COLORS.textDim }}>MAÑANA (8 a 12)</p>
+                  <p className="text-sm whitespace-pre-wrap mb-2" style={{ color: COLORS.text }}>
+                    {r.morningText || "(sin detalle)"}
                   </p>
+                  <p className="text-xs font-semibold mb-0.5" style={{ color: COLORS.textDim }}>TARDE (15 a 19)</p>
+                  <p className="text-sm whitespace-pre-wrap" style={{ color: COLORS.text }}>
+                    {r.afternoonText || "(sin detalle)"}
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <Badge
+                      text={r.morningBreak ? "Break mañana ✓ 15m" : "Sin break mañana"}
+                      color={r.morningBreak ? COLORS.green : COLORS.textDim}
+                      dim={r.morningBreak ? COLORS.greenDim : COLORS.surfaceAlt}
+                    />
+                    <Badge
+                      text={r.afternoonBreak ? "Break tarde ✓ 15m" : "Sin break tarde"}
+                      color={r.afternoonBreak ? COLORS.green : COLORS.textDim}
+                      dim={r.afternoonBreak ? COLORS.greenDim : COLORS.surfaceAlt}
+                    />
+                  </div>
                 </div>
               ))}
             {dailyReports.filter((r) => r.date.slice(0, 7) === diaryMonth).length === 0 && (
@@ -1649,21 +1698,28 @@ function MechanicPanel(props) {
 
   const today = todayDateKey();
   const todayEntry = dailyReports.find((r) => r.mechanicId === activeMechId && r.date === today);
-  const [dailyText, setDailyText] = useState(todayEntry?.text || "");
+  const [morningText, setMorningText] = useState(todayEntry?.morningText || "");
+  const [afternoonText, setAfternoonText] = useState(todayEntry?.afternoonText || "");
+  const [morningBreak, setMorningBreak] = useState(todayEntry?.morningBreak || false);
+  const [afternoonBreak, setAfternoonBreak] = useState(todayEntry?.afternoonBreak || false);
   const [dailySaved, setDailySaved] = useState(false);
 
   useEffect(() => {
     const entry = dailyReports.find((r) => r.mechanicId === activeMechId && r.date === today);
-    setDailyText(entry?.text || "");
+    setMorningText(entry?.morningText || "");
+    setAfternoonText(entry?.afternoonText || "");
+    setMorningBreak(entry?.morningBreak || false);
+    setAfternoonBreak(entry?.afternoonBreak || false);
   }, [activeMechId]);
 
   function saveDailyReport() {
     const existing = dailyReports.find((r) => r.mechanicId === activeMechId && r.date === today);
+    const payload = { morningText, afternoonText, morningBreak, afternoonBreak, updatedAt: Date.now() };
     let next;
     if (existing) {
-      next = dailyReports.map((r) => (r.id === existing.id ? { ...r, text: dailyText, updatedAt: Date.now() } : r));
+      next = dailyReports.map((r) => (r.id === existing.id ? { ...r, ...payload } : r));
     } else {
-      next = [...dailyReports, { id: uid(), mechanicId: activeMechId, date: today, text: dailyText, updatedAt: Date.now() }];
+      next = [...dailyReports, { id: uid(), mechanicId: activeMechId, date: today, ...payload }];
     }
     persistDailyReports(next);
     setDailySaved(true);
@@ -1691,16 +1747,47 @@ function MechanicPanel(props) {
         <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>
           Reporte del día
         </p>
-        <p className="text-xs mb-2 capitalize" style={{ color: COLORS.textDim }}>
+        <p className="text-xs mb-3 capitalize" style={{ color: COLORS.textDim }}>
           {formatDateLabel(today)}
         </p>
-        <textarea
-          value={dailyText}
-          onChange={(e) => setDailyText(e.target.value)}
-          placeholder="Contá brevemente qué hiciste hoy…"
-          style={{ ...inputStyle, minHeight: 80, width: "100%" }}
-        />
-        <div className="flex items-center gap-3 mt-2">
+
+        <Field label="Turno mañana (8:00 a 12:00)">
+          <textarea
+            value={morningText}
+            onChange={(e) => setMorningText(e.target.value)}
+            placeholder="Contá qué hiciste en el turno mañana…"
+            style={{ ...inputStyle, minHeight: 64, width: "100%" }}
+          />
+        </Field>
+        <label className="flex items-center gap-2 text-sm mt-2 mb-3" style={{ color: COLORS.text }}>
+          <input
+            type="checkbox"
+            checked={morningBreak}
+            onChange={(e) => setMorningBreak(e.target.checked)}
+            style={{ accentColor: COLORS.accent }}
+          />
+          Tomé el break de las 10:00 (15 min)
+        </label>
+
+        <Field label="Turno tarde (15:00 a 19:00)">
+          <textarea
+            value={afternoonText}
+            onChange={(e) => setAfternoonText(e.target.value)}
+            placeholder="Contá qué hiciste en el turno tarde…"
+            style={{ ...inputStyle, minHeight: 64, width: "100%" }}
+          />
+        </Field>
+        <label className="flex items-center gap-2 text-sm mt-2" style={{ color: COLORS.text }}>
+          <input
+            type="checkbox"
+            checked={afternoonBreak}
+            onChange={(e) => setAfternoonBreak(e.target.checked)}
+            style={{ accentColor: COLORS.accent }}
+          />
+          Tomé el break de las 17:00 (15 min)
+        </label>
+
+        <div className="flex items-center gap-3 mt-3">
           <ActionButton icon={Check} label="Guardar reporte" tone="accent" onClick={saveDailyReport} />
           {dailySaved && <span className="text-xs" style={{ color: COLORS.green }}>Guardado ✓</span>}
           {!dailySaved && todayEntry && (
