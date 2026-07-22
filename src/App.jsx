@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import {
   Play, Pause, Square, Plus, ClipboardList, BarChart3, Users, Download,
-  Wrench, ChevronDown, ChevronUp, X, Loader2, Pencil, Trash2, Check,
+  Wrench, ChevronDown, ChevronUp, X, Loader2, Pencil, Trash2, Check, MapPin,
 } from "lucide-react";
 import { doc, onSnapshot, updateDoc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
@@ -98,6 +98,32 @@ function formatHM(totalSeconds) {
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
+}
+
+function getLocation() {
+  return new Promise((resolve) => {
+    if (!("geolocation" in navigator)) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          lat: +pos.coords.latitude.toFixed(6),
+          lng: +pos.coords.longitude.toFixed(6),
+          accuracy: Math.round(pos.coords.accuracy),
+        }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+    );
+  });
+}
+
+function parseLatLng(str) {
+  if (!str) return null;
+  const s = str.trim();
+  let m = s.match(/^(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)$/);
+  if (m) return { lat: +m[1], lng: +m[2] };
+  m = s.match(/(?:q=|@|ll=|query=)(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
+  if (m) return { lat: +m[1], lng: +m[2] };
+  return null;
 }
 
 function getOrderSeconds(order, now) {
@@ -264,6 +290,22 @@ function TicketCard({ order, mechanicNames, now, expanded, onToggle, actions, sh
               <p className="text-xs mt-0.5" style={{ color: COLORS.textDim }}>
                 {order.trip.km || 0} km recorridos
               </p>
+              {(order.trip.originLoc || order.trip.destLoc) && (
+                <a
+                  href={
+                    order.trip.originLoc && order.trip.destLoc
+                      ? `https://www.google.com/maps/dir/?api=1&origin=${order.trip.originLoc.lat},${order.trip.originLoc.lng}&destination=${order.trip.destLoc.lat},${order.trip.destLoc.lng}`
+                      : `https://www.google.com/maps?q=${(order.trip.originLoc || order.trip.destLoc).lat},${(order.trip.originLoc || order.trip.destLoc).lng}`
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 mt-2 text-xs font-semibold w-fit"
+                  style={{ color: COLORS.accent }}
+                >
+                  <MapPin size={12} />
+                  {order.trip.originLoc && order.trip.destLoc ? "Ver trayecto en Maps" : "Ver ubicación en Maps"}
+                </a>
+              )}
             </div>
           )}
           {order.segments?.length > 0 && (
@@ -289,6 +331,32 @@ function TicketCard({ order, mechanicNames, now, expanded, onToggle, actions, sh
                     <p className="mt-0.5 italic" style={{ color: COLORS.text }}>
                       "{seg.note}"
                     </p>
+                  )}
+                  {(seg.startLoc || seg.endLoc) && (
+                    <div className="flex items-center gap-3 mt-0.5">
+                      {seg.startLoc && (
+                        <a
+                          href={`https://www.google.com/maps?q=${seg.startLoc.lat},${seg.startLoc.lng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1"
+                          style={{ color: COLORS.accent }}
+                        >
+                          <MapPin size={11} /> inicio
+                        </a>
+                      )}
+                      {seg.endLoc && (
+                        <a
+                          href={`https://www.google.com/maps?q=${seg.endLoc.lat},${seg.endLoc.lng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1"
+                          style={{ color: COLORS.accent }}
+                        >
+                          <MapPin size={11} /> fin
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
@@ -330,7 +398,7 @@ export default function App() {
   const [newMechName, setNewMechName] = useState("");
   const [form, setForm] = useState({
     client: "", vehicle: "", plate: "", description: "", type: "OTN", mechanicIds: [], branch: BRANCHES[0],
-    hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "",
+    hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "", tripOriginLoc: "", tripDestLoc: "",
   });
 
   // mechanic state
@@ -453,14 +521,20 @@ export default function App() {
       segments: [],
       createdAt: Date.now(),
       trip: form.hasTrip
-        ? { km: form.tripKm, origin: form.tripOrigin.trim(), destination: form.tripDestination.trim() }
+        ? {
+            km: form.tripKm,
+            origin: form.tripOrigin.trim(),
+            destination: form.tripDestination.trim(),
+            originLoc: parseLatLng(form.tripOriginLoc),
+            destLoc: parseLatLng(form.tripDestLoc),
+          }
         : null,
     };
     persistOrders([order, ...orders]);
     setForm({
       client: "", vehicle: "", plate: "", description: "", type: "OTN",
       mechanicIds: mechanics[0]?.id ? [mechanics[0].id] : [], branch: form.branch,
-      hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "",
+      hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "", tripOriginLoc: "", tripDestLoc: "",
     });
     setShowForm(false);
   }
@@ -470,36 +544,42 @@ export default function App() {
     persistOrders(next);
   }
 
-  function startOrder(id) {
+  async function startOrder(id) {
+    const loc = await getLocation();
     updateOrder(id, (o) => ({
       ...o,
       status: "en_progreso",
-      segments: [...(o.segments || []), { start: Date.now(), end: null }],
+      segments: [...(o.segments || []), { start: Date.now(), end: null, startLoc: loc }],
     }));
   }
 
-  function pauseOrder(id, note) {
+  async function pauseOrder(id, note) {
+    const loc = await getLocation();
     updateOrder(id, (o) => {
       const segs = [...(o.segments || [])];
       if (segs.length && !segs[segs.length - 1].end) {
-        segs[segs.length - 1] = { ...segs[segs.length - 1], end: Date.now(), note: (note || "").trim() };
+        segs[segs.length - 1] = { ...segs[segs.length - 1], end: Date.now(), note: (note || "").trim(), endLoc: loc };
       }
       return { ...o, status: "pausada", segments: segs };
     });
   }
 
-  function resumeOrder(id) {
+  async function resumeOrder(id) {
+    const loc = await getLocation();
     updateOrder(id, (o) => ({
       ...o,
       status: "en_progreso",
-      segments: [...(o.segments || []), { start: Date.now(), end: null }],
+      segments: [...(o.segments || []), { start: Date.now(), end: null, startLoc: loc }],
     }));
   }
 
-  function finishOrder(id, note) {
+  async function finishOrder(id, note) {
+    const loc = await getLocation();
     updateOrder(id, (o) => {
       const segs = [...(o.segments || [])];
-      if (segs.length && !segs[segs.length - 1].end) segs[segs.length - 1] = { ...segs[segs.length - 1], end: Date.now() };
+      if (segs.length && !segs[segs.length - 1].end) {
+        segs[segs.length - 1] = { ...segs[segs.length - 1], end: Date.now(), endLoc: loc };
+      }
       return { ...o, status: "finalizada", segments: segs, finishNote: (note || "").trim() };
     });
   }
@@ -1140,6 +1220,29 @@ function AdminPanel(props) {
                       placeholder="Punto de partida"
                     />
                   </Field>
+                  <Field label="Ubicación de inicio (opcional)">
+                    <div className="flex gap-2">
+                      <input
+                        value={form.tripOriginLoc}
+                        onChange={(e) => setForm({ ...form, tripOriginLoc: e.target.value })}
+                        className="w-full"
+                        style={inputStyle}
+                        placeholder="Pegá el link o coordenadas que te mandó el cliente"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const loc = await getLocation();
+                          if (loc) setForm((f) => ({ ...f, tripOriginLoc: `${loc.lat},${loc.lng}` }));
+                        }}
+                        className="px-3 rounded-md shrink-0"
+                        style={{ backgroundColor: COLORS.surfaceAlt, border: `1px solid ${COLORS.line}` }}
+                        aria-label="Usar mi ubicación actual"
+                      >
+                        <MapPin size={16} style={{ color: COLORS.accent }} />
+                      </button>
+                    </div>
+                  </Field>
                   <Field label="Destino">
                     <input
                       value={form.tripDestination}
@@ -1148,6 +1251,29 @@ function AdminPanel(props) {
                       style={inputStyle}
                       placeholder="Punto de llegada"
                     />
+                  </Field>
+                  <Field label="Ubicación de destino (opcional)">
+                    <div className="flex gap-2">
+                      <input
+                        value={form.tripDestLoc}
+                        onChange={(e) => setForm({ ...form, tripDestLoc: e.target.value })}
+                        className="w-full"
+                        style={inputStyle}
+                        placeholder="Pegá el link o coordenadas que te mandó el cliente"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const loc = await getLocation();
+                          if (loc) setForm((f) => ({ ...f, tripDestLoc: `${loc.lat},${loc.lng}` }));
+                        }}
+                        className="px-3 rounded-md shrink-0"
+                        style={{ backgroundColor: COLORS.surfaceAlt, border: `1px solid ${COLORS.line}` }}
+                        aria-label="Usar mi ubicación actual"
+                      >
+                        <MapPin size={16} style={{ color: COLORS.accent }} />
+                      </button>
+                    </div>
                   </Field>
                 </div>
               )}
