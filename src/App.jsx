@@ -116,16 +116,6 @@ function getLocation() {
   });
 }
 
-function parseLatLng(str) {
-  if (!str) return null;
-  const s = str.trim();
-  let m = s.match(/^(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)$/);
-  if (m) return { lat: +m[1], lng: +m[2] };
-  m = s.match(/(?:q=|@|ll=|query=)(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
-  if (m) return { lat: +m[1], lng: +m[2] };
-  return null;
-}
-
 function getOrderSeconds(order, now) {
   return (order.segments || []).reduce((acc, seg) => {
     const end = seg.end || now;
@@ -290,22 +280,6 @@ function TicketCard({ order, mechanicNames, now, expanded, onToggle, actions, sh
               <p className="text-xs mt-0.5" style={{ color: COLORS.textDim }}>
                 {order.trip.km || 0} km recorridos
               </p>
-              {(order.trip.originLoc || order.trip.destLoc) && (
-                <a
-                  href={
-                    order.trip.originLoc && order.trip.destLoc
-                      ? `https://www.google.com/maps/dir/?api=1&origin=${order.trip.originLoc.lat},${order.trip.originLoc.lng}&destination=${order.trip.destLoc.lat},${order.trip.destLoc.lng}`
-                      : `https://www.google.com/maps?q=${(order.trip.originLoc || order.trip.destLoc).lat},${(order.trip.originLoc || order.trip.destLoc).lng}`
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 mt-2 text-xs font-semibold w-fit"
-                  style={{ color: COLORS.accent }}
-                >
-                  <MapPin size={12} />
-                  {order.trip.originLoc && order.trip.destLoc ? "Ver trayecto en Maps" : "Ver ubicación en Maps"}
-                </a>
-              )}
             </div>
           )}
           {order.segments?.length > 0 && (
@@ -398,7 +372,7 @@ export default function App() {
   const [newMechName, setNewMechName] = useState("");
   const [form, setForm] = useState({
     client: "", vehicle: "", plate: "", description: "", type: "OTN", mechanicIds: [], branch: BRANCHES[0],
-    hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "", tripOriginLoc: "", tripDestLoc: "",
+    hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "",
   });
 
   // mechanic state
@@ -521,20 +495,14 @@ export default function App() {
       segments: [],
       createdAt: Date.now(),
       trip: form.hasTrip
-        ? {
-            km: form.tripKm,
-            origin: form.tripOrigin.trim(),
-            destination: form.tripDestination.trim(),
-            originLoc: parseLatLng(form.tripOriginLoc),
-            destLoc: parseLatLng(form.tripDestLoc),
-          }
+        ? { km: form.tripKm, origin: form.tripOrigin.trim(), destination: form.tripDestination.trim() }
         : null,
     };
     persistOrders([order, ...orders]);
     setForm({
       client: "", vehicle: "", plate: "", description: "", type: "OTN",
       mechanicIds: mechanics[0]?.id ? [mechanics[0].id] : [], branch: form.branch,
-      hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "", tripOriginLoc: "", tripDestLoc: "",
+      hasTrip: false, tripKm: "", tripOrigin: "", tripDestination: "",
     });
     setShowForm(false);
   }
@@ -1220,29 +1188,6 @@ function AdminPanel(props) {
                       placeholder="Punto de partida"
                     />
                   </Field>
-                  <Field label="Ubicación de inicio (opcional)">
-                    <div className="flex gap-2">
-                      <input
-                        value={form.tripOriginLoc}
-                        onChange={(e) => setForm({ ...form, tripOriginLoc: e.target.value })}
-                        className="w-full"
-                        style={inputStyle}
-                        placeholder="Pegá el link o coordenadas que te mandó el cliente"
-                      />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const loc = await getLocation();
-                          if (loc) setForm((f) => ({ ...f, tripOriginLoc: `${loc.lat},${loc.lng}` }));
-                        }}
-                        className="px-3 rounded-md shrink-0"
-                        style={{ backgroundColor: COLORS.surfaceAlt, border: `1px solid ${COLORS.line}` }}
-                        aria-label="Usar mi ubicación actual"
-                      >
-                        <MapPin size={16} style={{ color: COLORS.accent }} />
-                      </button>
-                    </div>
-                  </Field>
                   <Field label="Destino">
                     <input
                       value={form.tripDestination}
@@ -1251,29 +1196,6 @@ function AdminPanel(props) {
                       style={inputStyle}
                       placeholder="Punto de llegada"
                     />
-                  </Field>
-                  <Field label="Ubicación de destino (opcional)">
-                    <div className="flex gap-2">
-                      <input
-                        value={form.tripDestLoc}
-                        onChange={(e) => setForm({ ...form, tripDestLoc: e.target.value })}
-                        className="w-full"
-                        style={inputStyle}
-                        placeholder="Pegá el link o coordenadas que te mandó el cliente"
-                      />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const loc = await getLocation();
-                          if (loc) setForm((f) => ({ ...f, tripDestLoc: `${loc.lat},${loc.lng}` }));
-                        }}
-                        className="px-3 rounded-md shrink-0"
-                        style={{ backgroundColor: COLORS.surfaceAlt, border: `1px solid ${COLORS.line}` }}
-                        aria-label="Usar mi ubicación actual"
-                      >
-                        <MapPin size={16} style={{ color: COLORS.accent }} />
-                      </button>
-                    </div>
                   </Field>
                 </div>
               )}
