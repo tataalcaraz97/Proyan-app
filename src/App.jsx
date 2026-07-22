@@ -723,6 +723,9 @@ export default function App() {
       { header: "Sucursal", key: "branch", width: 14 },
       { header: "Mecánicos", key: "mechs", width: 26 },
       { header: "Horas (mes)", key: "hours", width: 12 },
+      { header: "Km viaje", key: "tripKm", width: 10 },
+      { header: "Tiempo viaje (h)", key: "travelH", width: 14 },
+      { header: "Tiempo viaje (h:min)", key: "travelHM", width: 16 },
     ];
     const header2 = ws2.getRow(1);
     header2.height = 22;
@@ -732,6 +735,7 @@ export default function App() {
       cell.alignment = { vertical: "middle", horizontal: "center" };
     });
 
+    const TRAVEL_SPEED_KMH = 100;
     orders.forEach((o) => {
       const monthSeconds = (o.segments || [])
         .filter((seg) => seg.end && monthKey(seg.start) === reportMonth)
@@ -739,6 +743,9 @@ export default function App() {
       if (monthSeconds === 0) return;
       const ids = getOrderMechanicIds(o);
       const mechNames = ids.map((id) => mechanicById[id]).filter(Boolean).join(", ");
+      const tripKm = o.trip?.km ? +o.trip.km : 0;
+      const travelHours = tripKm > 0 ? tripKm / TRAVEL_SPEED_KMH : 0;
+      const travelSeconds = travelHours * 3600;
       const row = ws2.addRow({
         code: o.code,
         client: o.client,
@@ -748,10 +755,17 @@ export default function App() {
         branch: o.branch || "",
         mechs: mechNames,
         hours: +formatHours(monthSeconds),
+        tripKm: tripKm || "",
+        travelH: tripKm > 0 ? +travelHours.toFixed(2) : "",
+        travelHM: tripKm > 0 ? formatHM(travelSeconds) : "",
       });
       row.alignment = { vertical: "middle", wrapText: true };
       row.getCell("hours").numFmt = "0.00";
       row.getCell("hours").alignment = { horizontal: "right" };
+      row.getCell("tripKm").alignment = { horizontal: "right" };
+      row.getCell("travelH").numFmt = "0.00";
+      row.getCell("travelH").alignment = { horizontal: "right" };
+      row.getCell("travelHM").alignment = { horizontal: "right" };
     });
 
     ws2.eachRow((row) => {
