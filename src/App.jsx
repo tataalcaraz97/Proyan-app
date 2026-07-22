@@ -167,6 +167,44 @@ function todayDateKey() {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+// Rango de fechas real (26 al 25) que corresponde a un período "YYYY-MM"
+function getPeriodRange(periodStr) {
+  const [y, m] = periodStr.split("-").map(Number);
+  const start = new Date(y, m - 2, 26);
+  const end = new Date(y, m - 1, 25);
+  return { start, end };
+}
+
+function eachDayInRange(start, end) {
+  const days = [];
+  const d = new Date(start);
+  while (d <= end) {
+    days.push(new Date(d));
+    d.setDate(d.getDate() + 1);
+  }
+  return days;
+}
+
+// Lunes = 0 ... Domingo = 6 (para armar la grilla del calendario)
+function mondayIndex(date) {
+  return (date.getDay() + 6) % 7;
+}
+
+// Sábado "sí" cada 2 semanas, de forma determinística (semana par del año)
+function isWorkSaturday(date) {
+  const jan1 = new Date(date.getFullYear(), 0, 1);
+  const diffDays = Math.floor((date - jan1) / 86400000);
+  const week = Math.floor((diffDays + jan1.getDay()) / 7);
+  return week % 2 === 0;
+}
+
+function getBranchSchedule(branch) {
+  if (branch === "Río Cuarto") {
+    return { weekdayHours: 9, saturdayHours: 0, worksSaturday: false };
+  }
+  return { weekdayHours: 8, saturdayHours: 4, worksSaturday: true }; // Mackenna
+}
+
 function formatDateLabel(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString("es-AR", {
@@ -240,6 +278,94 @@ function ActionButton({ icon: Icon, label, onClick, tone = "accent", full }) {
 /* ---------------------------------------------------------
    TICKET CARD (order)
 --------------------------------------------------------- */
+function MonthCalendar({ branch }) {
+  const period = currentMonthKey();
+  const { start, end } = getPeriodRange(period);
+  const days = eachDayInRange(start, end);
+  const schedule = getBranchSchedule(branch);
+
+  let totalHours = 0;
+  const dayInfo = days.map((d) => {
+    const dow = d.getDay();
+    let hours = 0;
+    if (dow >= 1 && dow <= 5) hours = schedule.weekdayHours;
+    else if (dow === 6 && schedule.worksSaturday && isWorkSaturday(d)) hours = schedule.saturdayHours;
+    totalHours += hours;
+    return { date: d, hours };
+  });
+
+  const weeks = [];
+  let current = [];
+  const firstPad = mondayIndex(days[0]);
+  for (let i = 0; i < firstPad; i++) current.push(null);
+  dayInfo.forEach((info) => {
+    current.push(info);
+    if (current.length === 7) {
+      weeks.push(current);
+      current = [];
+    }
+  });
+  if (current.length) {
+    while (current.length < 7) current.push(null);
+    weeks.push(current);
+  }
+
+  const todayStr = todayDateKey();
+
+  return (
+    <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.accent }}>
+          Calendario del período
+        </p>
+      </div>
+      <p className="text-xs mb-3" style={{ color: COLORS.textDim }}>
+        Del {start.toLocaleDateString("es-AR", { day: "numeric", month: "short" })} al{" "}
+        {end.toLocaleDateString("es-AR", { day: "numeric", month: "short" })}
+      </p>
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
+          <div key={i} className="text-center text-[10px] font-semibold" style={{ color: COLORS.textDim }}>
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="space-y-1">
+        {weeks.map((week, wi) => (
+          <div key={wi} className="grid grid-cols-7 gap-1">
+            {week.map((info, di) => {
+              if (!info) return <div key={di} />;
+              const dateKey = `${info.date.getFullYear()}-${pad2(info.date.getMonth() + 1)}-${pad2(info.date.getDate())}`;
+              const isToday = dateKey === todayStr;
+              const works = info.hours > 0;
+              return (
+                <div
+                  key={di}
+                  className="rounded-md flex flex-col items-center justify-center py-1"
+                  style={{
+                    backgroundColor: works ? COLORS.accentDim : COLORS.surfaceAlt,
+                    border: isToday ? `1.5px solid ${COLORS.accent}` : "1px solid transparent",
+                  }}
+                >
+                  <span className="text-[11px] font-semibold" style={{ color: works ? COLORS.accent : COLORS.textDim }}>
+                    {info.date.getDate()}
+                  </span>
+                  <span className="text-[9px]" style={{ color: COLORS.textDim }}>
+                    {works ? `${info.hours}h` : "-"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <p className="text-sm font-bold mt-3 text-right" style={{ color: COLORS.text }}>
+        Total del período: {totalHours}h
+      </p>
+    </div>
+  );
+}
+
 function TicketCard({ order, mechanicNames, now, expanded, onToggle, actions, showMechanic }) {
   const seconds = getOrderSeconds(order, now);
   const type = ORDER_TYPES[order.type];
@@ -1824,6 +1950,8 @@ function MechanicPanel(props) {
           </select>
         </Field>
       )}
+
+      <MonthCalendar branch={myBranch} />
 
       <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
         <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>
