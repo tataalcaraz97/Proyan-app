@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import {
   Play, Pause, Square, Plus, ClipboardList, BarChart3, Users, Download,
-  Wrench, ChevronDown, ChevronUp, X, Loader2, Pencil, Trash2, Check, MapPin,
+  Wrench, ChevronDown, ChevronUp, X, Loader2, Pencil, Trash2, Check, MapPin, FileText,
 } from "lucide-react";
 import { doc, onSnapshot, updateDoc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
@@ -130,6 +130,20 @@ function monthKey(ts) {
 
 function currentMonthKey() {
   return monthKey(Date.now());
+}
+
+function todayDateKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function formatDateLabel(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("es-AR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
 }
 
 function todayLabel() {
@@ -350,6 +364,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState([]);
   const [mechanics, setMechanics] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]);
   const [role, setRole] = useState("admin");
   const [now, setNow] = useState(Date.now());
   const [storageOk, setStorageOk] = useState(true);
@@ -388,6 +403,7 @@ export default function App() {
           const data = snap.data();
           setMechanics(data.mechanics || DEFAULT_MECHANICS);
           setOrders(data.orders || []);
+          setDailyReports(data.dailyReports || []);
           setAccessCode(data.accessCode || "02120512");
           setActiveMechId((prev) => prev || (data.mechanics || DEFAULT_MECHANICS)[0]?.id || "");
           setForm((f) => ({
@@ -395,7 +411,7 @@ export default function App() {
             mechanicIds: f.mechanicIds.length ? f.mechanicIds : [(data.mechanics || DEFAULT_MECHANICS)[0]?.id].filter(Boolean),
           }));
         } else {
-          setDoc(WORKSHOP_DOC, { mechanics: DEFAULT_MECHANICS, orders: [], accessCode: "02120512" });
+          setDoc(WORKSHOP_DOC, { mechanics: DEFAULT_MECHANICS, orders: [], accessCode: "02120512", dailyReports: [] });
           setMechanics(DEFAULT_MECHANICS);
           setActiveMechId(DEFAULT_MECHANICS[0]?.id || "");
           setForm((f) => ({ ...f, mechanicIds: DEFAULT_MECHANICS[0]?.id ? [DEFAULT_MECHANICS[0].id] : [] }));
@@ -431,6 +447,15 @@ export default function App() {
     setMechanics(next);
     try {
       await updateDoc(WORKSHOP_DOC, { mechanics: next });
+    } catch (e) {
+      setStorageOk(false);
+    }
+  }, []);
+
+  const persistDailyReports = useCallback(async (next) => {
+    setDailyReports(next);
+    try {
+      await updateDoc(WORKSHOP_DOC, { dailyReports: next });
     } catch (e) {
       setStorageOk(false);
     }
@@ -780,6 +805,43 @@ export default function App() {
     });
     ws2.views = [{ state: "frozen", ySplit: 1 }];
 
+    // ---- Tercera hoja: reportes diarios de los mecánicos ----
+    const ws3 = wb.addWorksheet("Reportes diarios");
+    ws3.columns = [
+      { header: "Fecha", key: "date", width: 14 },
+      { header: "Mecánico", key: "mech", width: 22 },
+      { header: "Detalle del día", key: "text", width: 60 },
+    ];
+    const header3 = ws3.getRow(1);
+    header3.height = 22;
+    header3.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1B1E22" } };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+    });
+    dailyReports
+      .filter((r) => r.date.slice(0, 7) === reportMonth)
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      .forEach((r) => {
+        const row = ws3.addRow({
+          date: r.date,
+          mech: mechanicById[r.mechanicId] || "",
+          text: r.text || "",
+        });
+        row.alignment = { vertical: "middle", wrapText: true };
+      });
+    ws3.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          left: { style: "thin", color: { argb: "FFE0E0E0" } },
+          right: { style: "thin", color: { argb: "FFE0E0E0" } },
+          top: { style: "thin", color: { argb: "FFE0E0E0" } },
+          bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+        };
+      });
+    });
+    ws3.views = [{ state: "frozen", ySplit: 1 }];
+
     const buffer = await wb.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -934,6 +996,7 @@ export default function App() {
             removeMechanicFromOrders={removeMechanicFromOrders}
             accessCode={accessCode}
             changeAccessCode={changeAccessCode}
+            dailyReports={dailyReports}
           />
         ) : (
           <MechanicPanel
@@ -951,6 +1014,8 @@ export default function App() {
             resumeOrder={resumeOrder}
             finishOrder={finishOrder}
             loggedInMechanicId={loggedInMechanicId}
+            dailyReports={dailyReports}
+            persistDailyReports={persistDailyReports}
           />
         )}
       </div>
@@ -972,8 +1037,10 @@ function AdminPanel(props) {
     showForm, setShowForm, form, setForm, createOrder, toggleFormMechanic, filteredOrders, expandedId, setExpandedId,
     mechanicById, mechanics, now, reportMonth, setReportMonth, reportRows, chartData, exportExcel,
     newMechName, setNewMechName, addMechanic, orders, persistMechanics, accessCode, changeAccessCode,
-    regenerateMechanicCode, removeMechanicFromOrders,
+    regenerateMechanicCode, removeMechanicFromOrders, dailyReports,
   } = props;
+
+  const [diaryMonth, setDiaryMonth] = useState(currentMonthKey());
 
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState("");
@@ -1014,6 +1081,7 @@ function AdminPanel(props) {
         {[
           { id: "ordenes", label: "Órdenes", icon: ClipboardList },
           { id: "reportes", label: "Reportes", icon: BarChart3 },
+          { id: "diario", label: "Diario", icon: FileText },
           { id: "equipo", label: "Equipo", icon: Users },
         ].map((t) => (
           <button
@@ -1327,6 +1395,50 @@ function AdminPanel(props) {
         </div>
       )}
 
+      {adminTab === "diario" && (
+        <div>
+          <Field label="Mes">
+            <input
+              type="month"
+              value={diaryMonth}
+              onChange={(e) => setDiaryMonth(e.target.value)}
+              style={inputStyle}
+              className="w-full"
+            />
+          </Field>
+          <div className="space-y-2 mt-3">
+            {dailyReports
+              .filter((r) => r.date.slice(0, 7) === diaryMonth)
+              .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1))
+              .map((r) => (
+                <div
+                  key={r.id}
+                  className="rounded-lg p-3"
+                  style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.line}` }}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-semibold" style={{ color: COLORS.text }}>
+                      {mechanicById[r.mechanicId] || "Mecánico"}
+                    </span>
+                    <span className="text-xs capitalize" style={{ color: COLORS.textDim }}>
+                      {formatDateLabel(r.date)}
+                    </span>
+                  </div>
+                  <p className="text-sm whitespace-pre-wrap" style={{ color: COLORS.text }}>
+                    {r.text || "(sin detalle)"}
+                  </p>
+                </div>
+              ))}
+            {dailyReports.filter((r) => r.date.slice(0, 7) === diaryMonth).length === 0 && (
+              <EmptyState text="No hay reportes diarios cargados para este mes." />
+            )}
+          </div>
+          <p className="text-[11px] mt-3 text-center" style={{ color: COLORS.textDim }}>
+            Estos reportes también se incluyen en el Excel exportado desde Reportes.
+          </p>
+        </div>
+      )}
+
       {adminTab === "equipo" && (
         <div>
           <form onSubmit={addMechanic} className="flex gap-2 mb-4">
@@ -1492,7 +1604,7 @@ function MechanicPanel(props) {
   const {
     mechanics, activeMechId, setActiveMechId, mechanicOrders, showFinished, setShowFinished,
     expandedId, setExpandedId, now, startOrder, pauseOrder, resumeOrder, finishOrder,
-    loggedInMechanicId,
+    loggedInMechanicId, dailyReports, persistDailyReports,
   } = props;
 
   const [pausingId, setPausingId] = useState(null);
@@ -1535,6 +1647,29 @@ function MechanicPanel(props) {
     setFinishNote("");
   }
 
+  const today = todayDateKey();
+  const todayEntry = dailyReports.find((r) => r.mechanicId === activeMechId && r.date === today);
+  const [dailyText, setDailyText] = useState(todayEntry?.text || "");
+  const [dailySaved, setDailySaved] = useState(false);
+
+  useEffect(() => {
+    const entry = dailyReports.find((r) => r.mechanicId === activeMechId && r.date === today);
+    setDailyText(entry?.text || "");
+  }, [activeMechId]);
+
+  function saveDailyReport() {
+    const existing = dailyReports.find((r) => r.mechanicId === activeMechId && r.date === today);
+    let next;
+    if (existing) {
+      next = dailyReports.map((r) => (r.id === existing.id ? { ...r, text: dailyText, updatedAt: Date.now() } : r));
+    } else {
+      next = [...dailyReports, { id: uid(), mechanicId: activeMechId, date: today, text: dailyText, updatedAt: Date.now() }];
+    }
+    persistDailyReports(next);
+    setDailySaved(true);
+    setTimeout(() => setDailySaved(false), 2000);
+  }
+
   return (
     <div>
       {loggedInMechanicId ? null : (
@@ -1551,6 +1686,30 @@ function MechanicPanel(props) {
           </select>
         </Field>
       )}
+
+      <div className="mt-4 rounded-lg p-4" style={{ backgroundColor: COLORS.surface, border: `1px solid ${COLORS.line}` }}>
+        <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: COLORS.accent }}>
+          Reporte del día
+        </p>
+        <p className="text-xs mb-2 capitalize" style={{ color: COLORS.textDim }}>
+          {formatDateLabel(today)}
+        </p>
+        <textarea
+          value={dailyText}
+          onChange={(e) => setDailyText(e.target.value)}
+          placeholder="Contá brevemente qué hiciste hoy…"
+          style={{ ...inputStyle, minHeight: 80, width: "100%" }}
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <ActionButton icon={Check} label="Guardar reporte" tone="accent" onClick={saveDailyReport} />
+          {dailySaved && <span className="text-xs" style={{ color: COLORS.green }}>Guardado ✓</span>}
+          {!dailySaved && todayEntry && (
+            <span className="text-xs" style={{ color: COLORS.textDim }}>
+              Última actualización {new Date(todayEntry.updatedAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
+      </div>
 
       <div className="flex items-center justify-between mt-4 mb-2">
         <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: COLORS.textDim }}>
