@@ -128,8 +128,38 @@ function monthKey(ts) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
 
+// Período de facturación: va del día 26 de un mes al día 25 del siguiente.
+// Ej: todo lo que pasa entre el 26/06 y el 25/07 pertenece al período "julio".
+function periodKey(ts) {
+  const d = new Date(ts);
+  let year = d.getFullYear();
+  let month = d.getMonth(); // 0-indexado
+  if (d.getDate() >= 26) {
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return `${year}-${pad2(month + 1)}`;
+}
+
+function periodKeyFromDateStr(dateStr) {
+  const [y, m, day] = dateStr.split("-").map(Number);
+  let year = y;
+  let month = m - 1;
+  if (day >= 26) {
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return `${year}-${pad2(month + 1)}`;
+}
+
 function currentMonthKey() {
-  return monthKey(Date.now());
+  return periodKey(Date.now());
 }
 
 function todayDateKey() {
@@ -634,7 +664,7 @@ export default function App() {
       if (ids.length === 0) return;
       (o.segments || []).forEach((seg) => {
         if (!seg.end) return; // solo tiempo cerrado cuenta para el reporte
-        if (monthKey(seg.start) !== reportMonth) return;
+        if (periodKey(seg.start) !== reportMonth) return;
         const segHours = (seg.end - seg.start) / 1000; // tiempo completo para cada mecánico que comparte la orden
         ids.forEach((id) => {
           if (acc[id]) acc[id][o.type] += segHours;
@@ -767,7 +797,7 @@ export default function App() {
     const TRAVEL_SPEED_KMH = 100;
     orders.forEach((o) => {
       const monthSeconds = (o.segments || [])
-        .filter((seg) => seg.end && monthKey(seg.start) === reportMonth)
+        .filter((seg) => seg.end && periodKey(seg.start) === reportMonth)
         .reduce((acc, seg) => acc + (seg.end - seg.start) / 1000, 0);
       if (monthSeconds === 0) return;
       const ids = getOrderMechanicIds(o);
@@ -833,7 +863,7 @@ export default function App() {
     let breakMinTotal = 0;
     let breakTardeTotal = 0;
     dailyReports
-      .filter((r) => r.date.slice(0, 7) === reportMonth)
+      .filter((r) => periodKeyFromDateStr(r.date) === reportMonth)
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
       .forEach((r) => {
         const isRC = r.branch === "Río Cuarto";
@@ -1357,6 +1387,9 @@ function AdminPanel(props) {
               className="w-full"
             />
           </Field>
+          <p className="text-[11px] mt-1.5" style={{ color: COLORS.textDim }}>
+            El período de "{reportMonth}" va del 26 del mes anterior al 25 de este mes.
+          </p>
 
           {orders.length === 0 ? (
             <EmptyState text="Todavía no hay órdenes cargadas para reportar." />
@@ -1447,9 +1480,12 @@ function AdminPanel(props) {
               className="w-full"
             />
           </Field>
+          <p className="text-[11px] mt-1.5" style={{ color: COLORS.textDim }}>
+            El período de "{diaryMonth}" va del 26 del mes anterior al 25 de este mes.
+          </p>
           <div className="space-y-2 mt-3">
             {dailyReports
-              .filter((r) => r.date.slice(0, 7) === diaryMonth)
+              .filter((r) => periodKeyFromDateStr(r.date) === diaryMonth)
               .sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1))
               .map((r) => (
                 <div
@@ -1505,7 +1541,7 @@ function AdminPanel(props) {
                   )}
                 </div>
               ))}
-            {dailyReports.filter((r) => r.date.slice(0, 7) === diaryMonth).length === 0 && (
+            {dailyReports.filter((r) => periodKeyFromDateStr(r.date) === diaryMonth).length === 0 && (
               <EmptyState text="No hay reportes diarios cargados para este mes." />
             )}
           </div>
